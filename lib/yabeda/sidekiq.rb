@@ -25,6 +25,7 @@ module Yabeda
       counter   :jobs_executed_total,  tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq executed."
       counter   :jobs_success_total,   tags: %i[queue worker], comment: "A counter of the total number of jobs successfully processed by sidekiq."
       counter   :jobs_failed_total,    tags: %i[queue worker], comment: "A counter of the total number of jobs failed in sidekiq."
+      gauge     :concurrency,          tags: %i[queue worker], comment: "The number of jobs a sidekiq worker can process at a time."
 
       gauge     :jobs_waiting_count,   tags: %i[queue], comment: "The number of jobs waiting to process in sidekiq."
       gauge     :active_workers_count, tags: [],        comment: "The number of currently running machines with sidekiq workers."
@@ -58,6 +59,8 @@ module Yabeda
         ::Sidekiq::Queue.all.each do |queue|
           sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
         end
+
+        sidekiq_concurrency.set({}, ::Sidekiq.options[:concurrency])
 
         # That is quite slow if your retry set is large
         # I don't want to enable it by default
