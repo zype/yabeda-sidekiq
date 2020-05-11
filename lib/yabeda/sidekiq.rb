@@ -34,6 +34,11 @@ module Yabeda
       gauge     :active_processes,     tags: [],        comment: "The number of active Sidekiq worker processes."
       gauge     :queue_latency,        tags: %i[queue], comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
 
+      gauge     :concurrency,          tags: [],        comment: "The number of jobs this process is configured to run at a time."
+      gauge     :busy_workers,         tags: [],        comment: "The number of concurrent workers this process is currently running."
+      gauge     :available_workers,    tags: [],        comment: "The number of workers this process has available for new jobs."
+      gauge     :saturation,           tags: [],        comment: "Percentage of workers this process has in use or otherwise unable to take new jobs."
+
       histogram :job_latency, comment: "The job latency, the difference in seconds between enqueued and running time",
                               unit: :seconds, per: :job,
                               tags: %i[queue worker],
@@ -58,6 +63,22 @@ module Yabeda
         ::Sidekiq::Queue.all.each do |queue|
           sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
         end
+
+        # Individual metrics from this Sidekiq process.
+        process_set = ::Sidekiq::ProcessSet.new
+        concurrency = ::Sidekiq.options[:concurrency]
+        busy_workers = 0
+        available_workers = 0
+        process_set.each do |process|
+          busy_workers += process['busy']
+          available_workers += (process['quiet'] == 'true') ? 0 : (concurrency - process['busy'])
+        end
+
+        sidekiq_concurrency.set({}, concurrency)
+        sidekiq_busy_workers.set({}, busy_workers)
+        sidekiq_available_workers.set({}, available_workers)
+        # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
+        sidekiq_saturation.set({}, 1 - (available_workers / (concurrency * process_set.size)))
 
         # That is quite slow if your retry set is large
         # I don't want to enable it by default
