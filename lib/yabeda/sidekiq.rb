@@ -76,6 +76,8 @@ module Yabeda
         sidekiq_concurrency.set({}, concurrency)
         sidekiq_busy_workers.set({}, busy_workers)
         sidekiq_available_workers.set({}, available_workers)
+        # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
+        sidekiq_saturation.set({}, 1 - (available_workers / (concurrency * process_set.size)))
 
         # That is quite slow if your retry set is large
         # I don't want to enable it by default
