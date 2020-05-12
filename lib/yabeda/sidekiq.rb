@@ -68,7 +68,6 @@ module Yabeda
         # so we may as well get everything from there.
         process_set = ::Sidekiq::ProcessSet.new
         total_concurrency = 0
-        total_busy_workers = 0
         total_available_workers = 0
         process_set.each do |process|
           concurrency = process['concurrency']
@@ -76,14 +75,12 @@ module Yabeda
           available_workers = (process['quiet'] == 'true') ? 0 : (concurrency - busy_workers)
 
           total_concurrency += concurrency
-          total_busy_workers += busy_workers
           total_available_workers += available_workers
         end
         # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
         saturation = 1 - (total_available_workers.to_f / total_concurrency)
 
         sidekiq_concurrency.set({}, total_concurrency)
-        sidekiq_busy_workers.set({}, total_busy_workers)
         sidekiq_available_workers.set({}, total_available_workers)
         sidekiq_saturation.set({}, saturation)
 
