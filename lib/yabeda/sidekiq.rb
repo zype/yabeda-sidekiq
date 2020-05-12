@@ -37,6 +37,7 @@ module Yabeda
       gauge     :concurrency,          tags: [],        comment: "The number of jobs this process is configured to run at a time."
       gauge     :busy_workers,         tags: [],        comment: "The number of concurrent workers this process is currently running."
       gauge     :available_workers,    tags: [],        comment: "The number of workers this process has available for new jobs."
+      gauge     :saturation,           tags: [],        comment: "Percentage of workers this process has in use or otherwise unable to take new jobs."
 
       histogram :job_latency, comment: "The job latency, the difference in seconds between enqueued and running time",
                               unit: :seconds, per: :job,
