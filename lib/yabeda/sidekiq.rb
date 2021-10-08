@@ -90,7 +90,7 @@ module Yabeda
         ::Sidekiq::Queue.all.each do |queue|
           saturation = 1 - (queue_available_workers[queue.name] / queue_concurrency[queue.name])
           sidekiq_saturation.set({ queue: queue.name }, saturation)
-          sidekiq_concurrency.set({}, queue_concurrency[queue.name])
+          sidekiq_concurrency.set({ queue: queue.name }, queue_concurrency[queue.name])
         end
 
         sidekiq_total_concurrency.set({}, total_concurrency)
