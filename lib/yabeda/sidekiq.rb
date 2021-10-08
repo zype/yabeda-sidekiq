@@ -34,9 +34,10 @@ module Yabeda
       gauge     :active_processes,     tags: [],        comment: "The number of active Sidekiq worker processes."
       gauge     :queue_latency,        tags: %i[queue], comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
 
-      gauge     :concurrency,          tags: [],        comment: "The total number of jobs that can be run at a time across all processes."
-      gauge     :available_workers,    tags: [],        comment: "The number of workers available for new jobs across all processes."
-      gauge     :saturation,           tags: [],        comment: "Percentage of workers available for new jobs across all processes."
+      gauge     :concurrency,          tags: %i[queue], comment: "The total number of jobs that can be run at a time across all processes."
+      gauge     :saturation,           tags: %i[queue], comment: "Percentage of workers available for new jobs across all processes."
+      gauge     :total_available_workers, tags: [], comment: "The number of workers available for new jobs across all processes."
+      gauge     :total_concurrency,       tags: [], comment: "The total number of jobs that can be run at a time across all processes."
 
       histogram :job_latency, comment: "The job latency, the difference in seconds between enqueued and running time",
                               unit: :seconds, per: :job,
@@ -63,6 +64,9 @@ module Yabeda
           sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
         end
 
+        queue_available_workers = ::Sidekiq::Queue.all.map { |p| [p.name, 0] }.to_h
+        queue_concurrency = ::Sidekiq::Queue.all.map { |p| [p.name, 0] }.to_h
+
         # Process-level metrics. These come from a common pool, but we can calculate them as global values.
         # The "quiet" flag (set when the process receives TSTP signal) is only available in the global ProcessSet,
         # so we may as well get everything from there.
@@ -70,19 +74,27 @@ module Yabeda
         total_concurrency = 0
         total_available_workers = 0
         process_set.each do |process|
-          concurrency = process['concurrency']
-          busy_workers = process['busy']
-          available_workers = (process['quiet'] == 'true') ? 0 : (concurrency - busy_workers)
+          concurrency = process["concurrency"]
+          busy_workers = process["busy"]
+          available_workers = process["quiet"] == "true" ? 0 : (concurrency - busy_workers)
+
+          process["queues"].each do |queue|
+            queue_available_workers[queue] += available_workers
+            queue_concurrency[queue] += concurrency
+          end
 
           total_concurrency += concurrency
           total_available_workers += available_workers
         end
-        # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
-        saturation = 1 - (total_available_workers.to_f / total_concurrency)
 
-        sidekiq_concurrency.set({}, total_concurrency)
-        sidekiq_available_workers.set({}, total_available_workers)
-        sidekiq_saturation.set({}, saturation)
+        ::Sidekiq::Queue.all.each do |queue|
+          saturation = 1 - (queue_available_workers[queue.name] / queue_concurrency[queue.name])
+          sidekiq_saturation.set({ queue: queue.name }, saturation)
+          sidekiq_concurrency.set({}, queue_concurrency[queue.name])
+        end
+
+        sidekiq_total_concurrency.set({}, total_concurrency)
+        sidekiq_total_available_workers.set({}, total_available_workers)
 
         # That is quite slow if your retry set is large
         # I don't want to enable it by default
