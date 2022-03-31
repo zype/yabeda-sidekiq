@@ -11,6 +11,9 @@ Metrics/BlockLength:
   - "Gemfile"
   - "spec/**/*"
 
+Layout/BlockAlignment:
+  Enabled: false
+
 Layout/LineLength:
   Max: 160
 

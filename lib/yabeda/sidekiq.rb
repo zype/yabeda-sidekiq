@@ -10,7 +10,7 @@ require "yabeda/sidekiq/server_middleware"
 require "yabeda/sidekiq/config"
 
 module Yabeda
-  module Sidekiq
+  module Sidekiq # rubocop:disable Metrics/ModuleLength
     LONG_RUNNING_JOB_RUNTIME_BUCKETS = [
       0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, # standard (from Prometheus)
       30, 60, 120, 300, 1800, 3600, 21_600, # Sidekiq tasks may be very long-running
@@ -53,7 +53,7 @@ module Yabeda
         gauge     :queue_latency,        tags: %i[queue], comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
         gauge     :concurrency,          tags: [],        comment: "The total number of jobs that can be run at a time across all processes."
         gauge     :available_workers,    tags: [],        comment: "The number of workers available for new jobs across all processes."
-        gauge     :saturation,           tags: [],        comment: "Percentage of workers available for new jobs across all processes."  
+        gauge     :saturation,           tags: [],        comment: "Percentage of workers available for new jobs across all processes."
       end
 
       collect do
@@ -83,9 +83,9 @@ module Yabeda
         total_concurrency = 0
         total_available_workers = 0
         process_set.each do |process|
-          concurrency = process['concurrency']
-          busy_workers = process['busy']
-          available_workers = (process['quiet'] == 'true') ? 0 : (concurrency - busy_workers)
+          concurrency = process["concurrency"]
+          busy_workers = process["busy"]
+          available_workers = process["quiet"] == "true" ? 0 : concurrency - busy_workers
 
           total_concurrency += concurrency
           total_available_workers += available_workers
