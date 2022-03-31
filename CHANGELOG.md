@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+## 0.8.1 - 2021-08-24
+
+### Fixed
+
+ - Compatibility with Sidekiq 6.2.2+ due to renamings in Sidekiq's undocumented API that yabeda-sidekiq uses. See [mperham/sidekiq#4971](https://github.com/mperham/sidekiq/discussions/4971). [@Envek]
+
+## 0.8.0 - 2021-05-12
+
+### Added
+
+ - `sidekiq_running_job_runtime` metric that tracks maximum runtime of currently running jobs. It may be useful for detection of hung jobs. See [#17](https://github.com/yabeda-rb/yabeda-sidekiq/pull/17). [@dsalahutdinov], [@Envek]
+
+ - Setting `collect_cluster_metrics` allowing to force enable or disable collection of global (whole Sidekiq installaction-wide) metrics. See [#20](https://github.com/yabeda-rb/yabeda-sidekiq/pull/20). [@mrexox]
+
+    By default all sidekiq worker processes (servers) collects global metrics about whole Sidekiq installation.
+    Client processes (everything else that is not Sidekiq worker) by default doesn't.
+
+    With this config you can override this behavior:
+    - force disable if you don't want multiple Sidekiq workers to report the same numbers (that causes excess load to both Redis and monitoring)
+    - force enable if you want non-Sidekiq process to collect them (like dedicated metric exporter process)
+
+## 0.7.0 - 2020-07-15
+
+### Changed
+
+ - Tags from `yabeda_tags` method are applied to all metrics collected inside a job, not only sidekiq-specific. See [#14](https://github.com/yabeda-rb/yabeda-sidekiq/issues/14). @Envek
+
+## 0.6.0 - 2020-07-15
+
+### Added
+
+ - Ability to override or add tags for every job via `yabeda_tags` method. @Envek
+
 ## 0.5.0 - 2020-02-20
 
 ### Added
@@ -49,5 +84,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
  - Initial release of evil-metrics-sidekiq gem. @Envek
 
+[@Envek]: https://github.com/Envek "Andrey Novikov"
 [@dsalahutdinov]: https://github.com/dsalahutdinov "Salahutdinov Dmitry"
 [@asusikov]: https://github.com/asusikov "Alexander Susikov"
+[@mrexox]: https://github.com/mrexox "Valentine Kiselev"
