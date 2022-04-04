@@ -7,47 +7,60 @@ require "yabeda"
 require "yabeda/sidekiq/version"
 require "yabeda/sidekiq/client_middleware"
 require "yabeda/sidekiq/server_middleware"
+require "yabeda/sidekiq/config"
 
 module Yabeda
-  module Sidekiq
+  module Sidekiq # rubocop:disable Metrics/ModuleLength
     LONG_RUNNING_JOB_RUNTIME_BUCKETS = [
       0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, # standard (from Prometheus)
-      30, 60, 120, 300, 1800, 3600, 21_600 # Sidekiq tasks may be very long-running
+      30, 60, 120, 300, 1800, 3600, 21_600, # Sidekiq tasks may be very long-running
     ].freeze
 
     Yabeda.configure do
+      config = Config.new
+
       group :sidekiq
 
       counter :jobs_enqueued_total, tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq enqueued."
 
-      next unless ::Sidekiq.server?
+      if ::Sidekiq.server?
+        counter   :jobs_executed_total,  tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq executed."
+        counter   :jobs_success_total,   tags: %i[queue worker], comment: "A counter of the total number of jobs successfully processed by sidekiq."
+        counter   :jobs_failed_total,    tags: %i[queue worker], comment: "A counter of the total number of jobs failed in sidekiq."
 
-      counter   :jobs_executed_total,  tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq executed."
-      counter   :jobs_success_total,   tags: %i[queue worker], comment: "A counter of the total number of jobs successfully processed by sidekiq."
-      counter   :jobs_failed_total,    tags: %i[queue worker], comment: "A counter of the total number of jobs failed in sidekiq."
+        gauge     :running_job_runtime,  tags: %i[queue worker], aggregation: :max, unit: :seconds,
+                                         comment: "How long currently running jobs are running (useful for detection of hung jobs)"
 
-      gauge     :jobs_waiting_count,   tags: %i[queue], comment: "The number of jobs waiting to process in sidekiq."
-      gauge     :active_workers_count, tags: [],        comment: "The number of currently running machines with sidekiq workers."
-      gauge     :jobs_scheduled_count, tags: [],        comment: "The number of jobs scheduled for later execution."
-      gauge     :jobs_retry_count,     tags: [],        comment: "The number of failed jobs waiting to be retried"
-      gauge     :jobs_dead_count,      tags: [],        comment: "The number of jobs exceeded their retry count."
-      gauge     :active_processes,     tags: [],        comment: "The number of active Sidekiq worker processes."
-      gauge     :queue_latency,        tags: %i[queue], comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
+        histogram :job_latency, comment: "The job latency, the difference in seconds between enqueued and running time",
+                                unit: :seconds, per: :job,
+                                tags: %i[queue worker],
+                                buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
+        histogram :job_runtime, comment: "A histogram of the job execution time.",
+                                unit: :seconds, per: :job,
+                                tags: %i[queue worker],
+                                buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
+      end
 
-      gauge     :concurrency,          tags: [],        comment: "The total number of jobs that can be run at a time across all processes."
-      gauge     :available_workers,    tags: [],        comment: "The number of workers available for new jobs across all processes."
-      gauge     :saturation,           tags: [],        comment: "Percentage of workers available for new jobs across all processes."
-
-      histogram :job_latency, comment: "The job latency, the difference in seconds between enqueued and running time",
-                              unit: :seconds, per: :job,
-                              tags: %i[queue worker],
-                              buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
-      histogram :job_runtime, comment: "A histogram of the job execution time.",
-                              unit: :seconds, per: :job,
-                              tags: %i[queue worker],
-                              buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
+      # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
+      # You can opt-out from collecting these by setting YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS to falsy value (+no+ or +false+)
+      if config.collect_cluster_metrics # defaults to +::Sidekiq.server?+
+        gauge     :jobs_waiting_count,   tags: %i[queue], comment: "The number of jobs waiting to process in sidekiq."
+        gauge     :active_workers_count, tags: [],        comment: "The number of currently running machines with sidekiq workers."
+        gauge     :jobs_scheduled_count, tags: [],        comment: "The number of jobs scheduled for later execution."
+        gauge     :jobs_retry_count,     tags: [],        comment: "The number of failed jobs waiting to be retried"
+        gauge     :jobs_dead_count,      tags: [],        comment: "The number of jobs exceeded their retry count."
+        gauge     :active_processes,     tags: [],        comment: "The number of active Sidekiq worker processes."
+        gauge     :queue_latency,        tags: %i[queue], comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
+        gauge     :concurrency,          tags: [],        comment: "The total number of jobs that can be run at a time across all processes."
+        gauge     :available_workers,    tags: [],        comment: "The number of workers available for new jobs across all processes."
+        gauge     :saturation,           tags: [],        comment: "Percentage of workers available for new jobs across all processes."
+      end
 
       collect do
+        Yabeda::Sidekiq.track_max_job_runtime if ::Sidekiq.server?
+
+        next unless config.collect_cluster_metrics
+
         stats = ::Sidekiq::Stats.new
 
         stats.queues.each do |k, v|
@@ -70,9 +83,9 @@ module Yabeda
         total_concurrency = 0
         total_available_workers = 0
         process_set.each do |process|
-          concurrency = process['concurrency']
-          busy_workers = process['busy']
-          available_workers = (process['quiet'] == 'true') ? 0 : (concurrency - busy_workers)
+          concurrency = process["concurrency"]
+          busy_workers = process["busy"]
+          available_workers = process["quiet"] == "true" ? 0 : concurrency - busy_workers
 
           total_concurrency += concurrency
           total_available_workers += available_workers
@@ -118,10 +131,34 @@ module Yabeda
 
       def worker_class(worker, job)
         if defined?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
-          return job["wrapped"] if worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
+          if worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) || worker == ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper
+            return job["wrapped"].to_s
+          end
         end
-        (worker.is_a?(String) ? worker : worker.class).to_s
+        (worker.is_a?(String) || worker.is_a?(Class) ? worker : worker.class).to_s
+      end
+
+      def custom_tags(worker, job)
+        return {} unless worker.respond_to?(:yabeda_tags)
+
+        worker.method(:yabeda_tags).arity.zero? ? worker.yabeda_tags : worker.yabeda_tags(*job["args"])
+      end
+
+      # Hash of hashes containing all currently running jobs' start timestamps
+      # to calculate maximum durations of currently running not yet completed jobs
+      # { { queue: "default", worker: "SomeJob" } => { "jid1" => 100500, "jid2" => 424242 } }
+      attr_accessor :jobs_started_at
+
+      def track_max_job_runtime
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        ::Yabeda::Sidekiq.jobs_started_at.each do |labels, jobs|
+          oldest_job_started_at = jobs.values.min
+          oldest_job_duration = oldest_job_started_at ? (now - oldest_job_started_at).round(3) : 0
+          Yabeda.sidekiq.running_job_runtime.set(labels, oldest_job_duration)
+        end
       end
     end
+
+    self.jobs_started_at = Concurrent::Hash.new { |hash, key| hash[key] = Concurrent::Hash.new }
   end
 end
