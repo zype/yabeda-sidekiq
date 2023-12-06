@@ -298,6 +298,33 @@ RSpec.describe Yabeda::Sidekiq do
         )
       end
     end
+
+    it "collects concurrency by tag", :aggregate_failures do
+      Yabeda.collectors.each(&:call)
+
+      expect(Yabeda.sidekiq.concurrency.values).to include(
+        { tag: "foo" } => 60,
+        { tag: "bar" } => 20,
+      )
+    end
+
+    it "collects available workers by tag", :aggregate_failures do
+      Yabeda.collectors.each(&:call)
+
+      expect(Yabeda.sidekiq.available_workers.values).to include(
+        { tag: "foo" } => 28,
+        { tag: "bar" } => 19,
+      )
+    end
+
+    it "collects worker saturation by tag", :aggregate_failures do
+      Yabeda.collectors.each(&:call)
+
+      expect(Yabeda.sidekiq.saturation.values).to include(
+        { tag: "foo" } => 0.5333,
+        { tag: "bar" } => 0.05,
+      )
+    end
   end
 
   def add_reroute_jobs_middleware
