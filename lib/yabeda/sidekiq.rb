@@ -57,9 +57,12 @@ module Yabeda
         gauge     :active_processes,     tags: [],        aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
         gauge     :queue_latency,        tags: %i[queue], aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
-        gauge     :concurrency,          tags: %i[tag],   aggregation: :most_recent, comment: "The total number of jobs that can be run at a time across all processes, by tag."
-        gauge     :available_workers,    tags: %i[tag],   aggregation: :most_recent, comment: "The number of workers available for new jobs across all processes, by tag."
-        gauge     :saturation,           tags: %i[tag],   aggregation: :most_recent, comment: "Percentage of workers available for new jobs across all processes, by tag."
+        gauge     :concurrency,          tags: %i[tag],   aggregation: :most_recent,
+                                         comment: "The total number of jobs that can be run at a time across all processes, by tag."
+        gauge     :available_workers,    tags: %i[tag],   aggregation: :most_recent,
+                                         comment: "The number of workers available for new jobs across all processes, by tag."
+        gauge     :saturation,           tags: %i[tag],   aggregation: :most_recent,
+                                         comment: "Percentage of workers available for new jobs across all processes, by tag."
       end
 
       collect do
@@ -98,13 +101,12 @@ module Yabeda
           available_workers_by_tag[tag] += available_workers
         end
         # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
-        saturations_by_tag = {}
         concurrencies_by_tag.each do |tag, total_concurrency|
           total_available_workers = available_workers_by_tag[tag]
 
-          sidekiq_concurrency.set(tag: tag, total_concurrency)
-          sidekiq_available_workers.set(tag: tag, total_available_workers)
-          sidekiq_saturation.set(tag: tag, (1 - (total_available_workers.to_f / total_concurrency)))
+          sidekiq_concurrency.set({ tag: tag }, total_concurrency)
+          sidekiq_available_workers.set({ tag: tag }, total_available_workers)
+          sidekiq_saturation.set({ tag: tag }, (1 - (total_available_workers.to_f / total_concurrency)))
         end
 
         # That is quite slow if your retry set is large
@@ -140,11 +142,12 @@ module Yabeda
       end
 
       def worker_class(worker, job)
-        if defined?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
-          if worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) || worker == ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper
-            return job["wrapped"].to_s
-          end
+        if defined?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) &&
+           (worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) ||
+           worker == ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
+          return job["wrapped"].to_s
         end
+
         (worker.is_a?(String) || worker.is_a?(Class) ? worker : worker.class).to_s
       end
 
