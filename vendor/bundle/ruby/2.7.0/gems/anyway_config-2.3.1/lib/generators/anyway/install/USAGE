@@ -1,4 +1,0 @@
-Description:
-    Generates a base config class (ApplicationConfig) for your application and
-    add the required configuriton (.gitignore, config/application.rb).
-
