@@ -57,9 +57,9 @@ module Yabeda
         gauge     :active_processes,     tags: [],        aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
         gauge     :queue_latency,        tags: %i[queue], aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
-        gauge     :concurrency,          tags: %i[tag]    aggregation: :most_recent, comment: "The total number of jobs that can be run at a time across all processes, by app tag."
-        gauge     :available_workers,    tags: %i[tag],   aggregation: :most_recent, comment: "The number of workers available for new jobs across all processes, by app tag."
-        gauge     :saturation,           tags: %i[tag],   aggregation: :most_recent, comment: "Percentage of workers available for new jobs across all processes, by app tag."
+        gauge     :concurrency,          tags: [],        aggregation: :most_recent, comment: "The total number of jobs that can be run at a time across all processes."
+        gauge     :available_workers,    tags: [],        aggregation: :most_recent, comment: "The number of workers available for new jobs across all processes."
+        gauge     :saturation,           tags: [],        aggregation: :most_recent, comment: "Percentage of workers available for new jobs across all processes."
       end
 
       collect do
@@ -86,26 +86,22 @@ module Yabeda
         # The "quiet" flag (set when the process receives TSTP signal) is only available in the global ProcessSet,
         # so we may as well get everything from there.
         process_set = ::Sidekiq::ProcessSet.new
-        concurrencies_by_tag = Hash.new(0)
-        available_workers_by_tag = Hash.new(0)
+        total_concurrency = 0
+        total_available_workers = 0
         process_set.each do |process|
-          tag = process["tag"]
           concurrency = process["concurrency"]
           busy_workers = process["busy"]
           available_workers = process["quiet"] == "true" ? 0 : concurrency - busy_workers
 
-          concurrencies_by_tag[tag] += concurrency
-          available_workers_by_tag[tag] += available_workers
+          total_concurrency += concurrency
+          total_available_workers += available_workers
         end
         # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
-        saturations_by_tag = {}
-        concurrencies_by_tag.each do |tag, total_concurrency|
-          total_available_workers = available_workers_by_tag[tag]
+        saturation = 1 - (total_available_workers.to_f / total_concurrency)
 
-          sidekiq_concurrency.set(tag: tag, total_concurrency)
-          sidekiq_available_workers.set(tag: tag, total_available_workers)
-          sidekiq_saturation.set(tag: tag, (1 - (total_available_workers.to_f / total_concurrency)))
-        end
+        sidekiq_concurrency.set({}, total_concurrency)
+        sidekiq_available_workers.set({}, total_available_workers)
+        sidekiq_saturation.set({}, saturation)
 
         # That is quite slow if your retry set is large
         # I don't want to enable it by default
