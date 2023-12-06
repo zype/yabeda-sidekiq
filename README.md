@@ -62,6 +62,16 @@ Metrics representing state of the whole Sidekiq installation (queues, processes,
 
 By default all sidekiq worker processes (servers) collects global metrics about whole Sidekiq installation. This can be overridden by setting `collect_cluster_metrics` config key to `true` for non-Sidekiq processes or to `false` for Sidekiq processes (e.g. by setting `YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS` env variable to `no`, see other methods in [anyway_config] docs).
 
+### Client metrics
+
+Metrics collected where jobs are being pushed to queues (everywhere):
+
+- Total number of enqueued jobs: `sidekiq_jobs_enqueued_total_count` (segmented by `queue` and `worker` class name)
+
+- Total number of rerouted jobs: `sidekiq_jobs_rerouted_total_count` (segmented by origin queue `from_queue`, rerouted queue `to_queue`, and `worker` class name).
+
+  Rerouted jobs are jobs that on enqueue were pushed to different queue from the one specified in worker's `sidekiq_options`, most probably by some middleware.
+
 ## Custom tags
 
 You can add additional tags to these metrics by declaring `yabeda_tags` method in your worker.
@@ -89,9 +99,10 @@ end
 
 Configuration is handled by [anyway_config] gem. With it you can load settings from environment variables (upcased and prefixed with `YABEDA_SIDEKIQ_`), YAML files, and other sources. See [anyway_config] docs for details.
 
-Config key                | Type     | Default                                                 | Description |
-------------------------- | -------- | ------------------------------------------------------- | ----------- |
+Config key                | Type     | Default                                                 | Description                                                                                                                                        |
+------------------------- | -------- | ------------------------------------------------------- |----------------------------------------------------------------------------------------------------------------------------------------------------|
 `collect_cluster_metrics` | boolean  | Enabled in Sidekiq worker processes, disabled otherwise | Defines whether this Ruby process should collect and expose metrics representing state of the whole Sidekiq installation (queues, processes, etc). |
+`declare_process_metrics` | boolean  | Enabled in Sidekiq worker processes, disabled otherwise | Declare metrics that are only tracked inside worker process even outside of them. Useful for multiprocess metric collection.                       |
 
 # Roadmap (TODO or Help wanted)
 
