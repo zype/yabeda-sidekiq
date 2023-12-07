@@ -106,7 +106,7 @@ module Yabeda
 
           sidekiq_concurrency.set({ tag: tag }, total_concurrency)
           sidekiq_available_workers.set({ tag: tag }, total_available_workers)
-          sidekiq_saturation.set({ tag: tag }, (1 - (total_available_workers.to_f / total_concurrency)))
+          sidekiq_saturation.set({ tag: tag }, (1 - (total_available_workers.to_f / total_concurrency)).round(4))
         end
 
         # That is quite slow if your retry set is large
