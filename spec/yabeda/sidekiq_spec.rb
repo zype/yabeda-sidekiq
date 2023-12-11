@@ -12,6 +12,7 @@ RSpec.describe Yabeda::Sidekiq do
   describe "plain Sidekiq jobs" do
     it "counts enqueues" do
       Yabeda.sidekiq.jobs_enqueued_total.values.clear # This is a hack
+      Yabeda.sidekiq.jobs_rerouted_total.values.clear # This is a hack
 
       SamplePlainJob.perform_async
       SamplePlainJob.perform_async
@@ -21,6 +22,34 @@ RSpec.describe Yabeda::Sidekiq do
         { queue: "default", worker: "SamplePlainJob" } => 2,
         { queue: "default", worker: "FailingPlainJob" } => 1,
       )
+
+      expect(Yabeda.sidekiq.jobs_rerouted_total.values).to be_empty
+    end
+
+    describe "re-routing jobs by middleware" do
+      around do |example|
+        add_reroute_jobs_middleware
+        example.run
+        remove_reroute_jobs_middleware
+      end
+
+      it "counts enqueues" do
+        Yabeda.sidekiq.jobs_enqueued_total.values.clear # This is a hack
+        Yabeda.sidekiq.jobs_rerouted_total.values.clear # This is a hack
+
+        SamplePlainJob.perform_async
+        SamplePlainJob.perform_async
+        FailingPlainJob.perform_async
+
+        expect(Yabeda.sidekiq.jobs_enqueued_total.values).to include(
+          { queue: "rerouted_queue", worker: "SamplePlainJob" } => 2,
+          { queue: "rerouted_queue", worker: "FailingPlainJob" } => 1,
+        )
+        expect(Yabeda.sidekiq.jobs_rerouted_total.values).to include(
+          { from_queue: "default", to_queue: "rerouted_queue", worker: "SamplePlainJob" } => 2,
+          { from_queue: "default", to_queue: "rerouted_queue", worker: "FailingPlainJob" } => 1,
+        )
+      end
     end
 
     it "measures runtime" do
@@ -59,10 +88,32 @@ RSpec.describe Yabeda::Sidekiq do
   describe "ActiveJob jobs" do
     it "counts enqueues" do
       Yabeda.sidekiq.jobs_enqueued_total.values.clear # This is a hack
+      Yabeda.sidekiq.jobs_rerouted_total.values.clear # This is a hack
       SampleActiveJob.perform_later
       expect(Yabeda.sidekiq.jobs_enqueued_total.values).to include(
         { queue: "default", worker: "SampleActiveJob" } => 1,
       )
+      expect(Yabeda.sidekiq.jobs_rerouted_total.values).to be_empty
+    end
+
+    describe "re-routing jobs by middleware" do
+      around do |example|
+        add_reroute_jobs_middleware
+        example.run
+        remove_reroute_jobs_middleware
+      end
+
+      it "counts enqueues" do
+        Yabeda.sidekiq.jobs_enqueued_total.values.clear # This is a hack
+        Yabeda.sidekiq.jobs_rerouted_total.values.clear # This is a hack
+        SampleActiveJob.perform_later
+        expect(Yabeda.sidekiq.jobs_enqueued_total.values).to include(
+          { queue: "rerouted_queue", worker: "SampleActiveJob" } => 1,
+        )
+        expect(Yabeda.sidekiq.jobs_rerouted_total.values).to include(
+          { from_queue: "default", to_queue: "rerouted_queue", worker: "SampleActiveJob" } => 1,
+        )
+      end
     end
 
     it "measures runtime" do
@@ -140,6 +191,48 @@ RSpec.describe Yabeda::Sidekiq do
           OpenStruct.new({ name: "mailers", latency: 0 }),
         ],
       )
+      allow(Sidekiq::Queue).to receive(:all).and_return(
+        [
+          OpenStruct.new({ name: "default", latency: 0.5 }),
+          OpenStruct.new({ name: "mailers", latency: 0 }),
+        ],
+      )
+      allow(Sidekiq::ProcessSet).to receive(:new).and_return(
+        [
+          OpenStruct.new({
+                           hostname: "host-foo-1",
+                           tag: "foo",
+                           concurrency: 20,
+                           queues: %w[default mailers],
+                           busy: 4,
+                           quiet: "false",
+                         }),
+          OpenStruct.new({
+                           hostname: "host-foo-2",
+                           tag: "foo",
+                           concurrency: 20,
+                           queues: %w[default mailers],
+                           busy: 8,
+                           quiet: "false",
+                         }),
+          OpenStruct.new({
+                           hostname: "host-foo-3",
+                           tag: "foo",
+                           concurrency: 20,
+                           queues: %w[default mailers],
+                           busy: 1,
+                           quiet: "true",
+                         }),
+          OpenStruct.new({
+                           hostname: "host-bar-4",
+                           tag: "bar",
+                           concurrency: 20,
+                           queues: ["heavy"],
+                           busy: 1,
+                           quiet: "false",
+                         }),
+        ],
+      )
     end
 
     it "collects queue latencies" do
@@ -203,6 +296,22 @@ RSpec.describe Yabeda::Sidekiq do
           { queue: "default", worker: "SampleLongRunningJob" } => 0,
           { queue: "default", worker: "FailingActiveJob" } => 0,
         )
+      end
+    end
+  end
+
+  def add_reroute_jobs_middleware
+    ::Sidekiq.configure_server do |config|
+      config.client_middleware do |chain|
+        chain.insert_before Yabeda::Sidekiq::ClientMiddleware, ReRouteJobsMiddleware
+      end
+    end
+  end
+
+  def remove_reroute_jobs_middleware
+    ::Sidekiq.configure_server do |config|
+      config.client_middleware do |chain|
+        chain.remove ReRouteJobsMiddleware
       end
     end
   end
