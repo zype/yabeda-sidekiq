@@ -57,9 +57,12 @@ module Yabeda
         gauge     :active_processes,     tags: [],        aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
         gauge     :queue_latency,        tags: %i[queue], aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
-        gauge     :concurrency,          tags: [],        aggregation: :most_recent, comment: "The total number of jobs that can be run at a time across all processes."
-        gauge     :available_workers,    tags: [],        aggregation: :most_recent, comment: "The number of workers available for new jobs across all processes."
-        gauge     :saturation,           tags: [],        aggregation: :most_recent, comment: "Percentage of workers available for new jobs across all processes."
+        gauge     :concurrency,          tags: [],        aggregation: :most_recent,
+                                         comment: "The total number of jobs that can be run at a time across all processes."
+        gauge     :available_workers,    tags: [],        aggregation: :most_recent,
+                                         comment: "The number of workers available for new jobs across all processes."
+        gauge     :saturation,           tags: [],        aggregation: :most_recent,
+                                         comment: "Percentage of workers available for new jobs across all processes."
       end
 
       collect do
@@ -136,11 +139,12 @@ module Yabeda
       end
 
       def worker_class(worker, job)
-        if defined?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
-          if worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) || worker == ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper
-            return job["wrapped"].to_s
-          end
+        if defined?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) &&
+           (worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) ||
+           worker == ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
+          return job["wrapped"].to_s
         end
+
         (worker.is_a?(String) || worker.is_a?(Class) ? worker : worker.class).to_s
       end
 

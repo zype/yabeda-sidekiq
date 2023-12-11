@@ -14,8 +14,9 @@ Gem::Specification.new do |spec|
   spec.description   = "Prometheus exporter for easy collecting most important of your Sidekiq metrics"
   spec.homepage      = "https://github.com/yabeda-rb/yabeda-sidekiq"
   spec.license       = "MIT"
+  spec.required_ruby_version = ">= 2.7.0"
 
-  spec.files         = `git ls-files -z`.split("\x0").reject do |f|
+  spec.files = `git ls-files -z`.split("\x0").reject do |f|
     f.match(%r{^(test|spec|features)/})
   end
   spec.bindir        = "exe"
@@ -23,7 +24,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "anyway_config", ">= 1.3", "< 3"
-  spec.add_dependency "sidekiq"
+  spec.add_dependency "sidekiq", "< 7.0"
   spec.add_dependency "yabeda", "~> 0.6"
 
   spec.add_development_dependency "activejob", ">= 6.0"

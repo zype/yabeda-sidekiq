@@ -191,6 +191,48 @@ RSpec.describe Yabeda::Sidekiq do
           OpenStruct.new({ name: "mailers", latency: 0 }),
         ],
       )
+      allow(Sidekiq::Queue).to receive(:all).and_return(
+        [
+          OpenStruct.new({ name: "default", latency: 0.5 }),
+          OpenStruct.new({ name: "mailers", latency: 0 }),
+        ],
+      )
+      allow(Sidekiq::ProcessSet).to receive(:new).and_return(
+        [
+          OpenStruct.new({
+                           hostname: "host-foo-1",
+                           tag: "foo",
+                           concurrency: 20,
+                           queues: %w[default mailers],
+                           busy: 4,
+                           quiet: "false",
+                         }),
+          OpenStruct.new({
+                           hostname: "host-foo-2",
+                           tag: "foo",
+                           concurrency: 20,
+                           queues: %w[default mailers],
+                           busy: 8,
+                           quiet: "false",
+                         }),
+          OpenStruct.new({
+                           hostname: "host-foo-3",
+                           tag: "foo",
+                           concurrency: 20,
+                           queues: %w[default mailers],
+                           busy: 1,
+                           quiet: "true",
+                         }),
+          OpenStruct.new({
+                           hostname: "host-bar-4",
+                           tag: "bar",
+                           concurrency: 20,
+                           queues: ["heavy"],
+                           busy: 1,
+                           quiet: "false",
+                         }),
+        ],
+      )
     end
 
     it "collects queue latencies" do
