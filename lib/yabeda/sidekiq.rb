@@ -16,14 +16,19 @@ module Yabeda
       30, 60, 120, 300, 1800, 3600, 21_600, # Sidekiq tasks may be very long-running
     ].freeze
 
+    def self.config
+      @config ||= Config.new
+    end
+
     Yabeda.configure do
-      config = Config.new
+      config = ::Yabeda::Sidekiq.config
 
       group :sidekiq
 
       counter :jobs_enqueued_total, tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq enqueued."
+      counter :jobs_rerouted_total, tags: %i[from_queue to_queue worker], comment: "A counter of the total number of rerouted jobs sidekiq enqueued."
 
-      if ::Sidekiq.server?
+      if config.declare_process_metrics # defaults to +::Sidekiq.server?+
         counter   :jobs_executed_total,  tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq executed."
         counter   :jobs_success_total,   tags: %i[queue worker], comment: "A counter of the total number of jobs successfully processed by sidekiq."
         counter   :jobs_failed_total,    tags: %i[queue worker], comment: "A counter of the total number of jobs failed in sidekiq."
@@ -44,16 +49,17 @@ module Yabeda
       # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
       # You can opt-out from collecting these by setting YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS to falsy value (+no+ or +false+)
       if config.collect_cluster_metrics # defaults to +::Sidekiq.server?+
-        gauge     :jobs_waiting_count,   tags: %i[queue], comment: "The number of jobs waiting to process in sidekiq."
-        gauge     :active_workers_count, tags: [],        comment: "The number of currently running machines with sidekiq workers."
-        gauge     :jobs_scheduled_count, tags: [],        comment: "The number of jobs scheduled for later execution."
-        gauge     :jobs_retry_count,     tags: [],        comment: "The number of failed jobs waiting to be retried"
-        gauge     :jobs_dead_count,      tags: [],        comment: "The number of jobs exceeded their retry count."
-        gauge     :active_processes,     tags: [],        comment: "The number of active Sidekiq worker processes."
-        gauge     :queue_latency,        tags: %i[queue], comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
-        gauge     :concurrency,          tags: [],        comment: "The total number of jobs that can be run at a time across all processes."
-        gauge     :available_workers,    tags: [],        comment: "The number of workers available for new jobs across all processes."
-        gauge     :saturation,           tags: [],        comment: "Percentage of workers available for new jobs across all processes."
+        gauge     :jobs_waiting_count,   tags: %i[queue], aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
+        gauge     :active_workers_count, tags: [],        aggregation: :most_recent, comment: "The number of currently running machines with sidekiq workers."
+        gauge     :jobs_scheduled_count, tags: [],        aggregation: :most_recent, comment: "The number of jobs scheduled for later execution."
+        gauge     :jobs_retry_count,     tags: [],        aggregation: :most_recent, comment: "The number of failed jobs waiting to be retried"
+        gauge     :jobs_dead_count,      tags: [],        aggregation: :most_recent, comment: "The number of jobs exceeded their retry count."
+        gauge     :active_processes,     tags: [],        aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
+        gauge     :queue_latency,        tags: %i[queue], aggregation: :most_recent,
+                                         comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
+        gauge     :concurrency,          tags: [],        aggregation: :most_recent, comment: "The total number of jobs that can be run at a time across all processes."
+        gauge     :available_workers,    tags: [],        aggregation: :most_recent, comment: "The number of workers available for new jobs across all processes."
+        gauge     :saturation,           tags: [],        aggregation: :most_recent, comment: "Percentage of workers available for new jobs across all processes."
       end
 
       collect do
@@ -159,6 +165,6 @@ module Yabeda
       end
     end
 
-    self.jobs_started_at = Concurrent::Hash.new { |hash, key| hash[key] = Concurrent::Hash.new }
+    self.jobs_started_at = Concurrent::Map.new { |hash, key| hash[key] = Concurrent::Map.new }
   end
 end
