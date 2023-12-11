@@ -62,7 +62,7 @@ module Yabeda
         gauge     :available_workers,    tags: %i[tag],   aggregation: :most_recent,
                                          comment: "The number of workers available for new jobs across all processes, by tag."
         gauge     :saturation,           tags: %i[tag],   aggregation: :most_recent,
-                                         comment: "Percentage of workers available for new jobs across all processes, by tag."
+                                         comment: "Percentage of workers being consumed out of those that would otherwise be available, by tag."
       end
 
       collect do

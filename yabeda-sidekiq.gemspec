@@ -9,6 +9,7 @@ Gem::Specification.new do |spec|
   spec.version       = Yabeda::Sidekiq::VERSION
   spec.authors       = ["Andrey Novikov"]
   spec.email         = ["envek@envek.name"]
+  spec.required_ruby_version = ">= 2.7.0"
 
   spec.summary       = "Extensible Prometheus exporter for monitoring your Sidekiq"
   spec.description   = "Prometheus exporter for easy collecting most important of your Sidekiq metrics"
