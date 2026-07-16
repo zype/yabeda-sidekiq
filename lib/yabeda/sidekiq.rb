@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "set"
 require "sidekiq"
 require "sidekiq/api"
 
@@ -49,14 +50,15 @@ module Yabeda
       # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
       # You can opt-out from collecting these by setting YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS to falsy value (+no+ or +false+)
       if config.collect_cluster_metrics # defaults to +::Sidekiq.server?+
-        gauge     :jobs_waiting_count,   tags: %i[queue], aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
+        gauge     :jobs_waiting_count,   tags: %i[queue tag], aggregation: :most_recent,
+                                         comment: "The number of jobs waiting to process in sidekiq, and which tag consumes that queue."
         gauge     :active_workers_count, tags: [],        aggregation: :most_recent, comment: "The number of currently running machines with sidekiq workers."
         gauge     :jobs_scheduled_count, tags: [],        aggregation: :most_recent, comment: "The number of jobs scheduled for later execution."
         gauge     :jobs_retry_count,     tags: [],        aggregation: :most_recent, comment: "The number of failed jobs waiting to be retried"
         gauge     :jobs_dead_count,      tags: [],        aggregation: :most_recent, comment: "The number of jobs exceeded their retry count."
         gauge     :active_processes,     tags: [],        aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
-        gauge     :queue_latency,        tags: %i[queue], aggregation: :most_recent,
-                                         comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
+        gauge     :queue_latency,        tags: %i[queue tag], aggregation: :most_recent,
+                                         comment: "The queue latency in seconds since the oldest job was enqueued, and which tag consumes that queue."
         gauge     :concurrency,          tags: %i[tag],   aggregation: :most_recent,
                                          comment: "The total number of jobs that can be run at a time across all processes, by tag."
         gauge     :available_workers,    tags: %i[tag],   aggregation: :most_recent,
@@ -72,18 +74,11 @@ module Yabeda
 
         stats = ::Sidekiq::Stats.new
 
-        stats.queues.each do |k, v|
-          sidekiq_jobs_waiting_count.set({ queue: k }, v)
-        end
         sidekiq_active_workers_count.set({}, stats.workers_size)
         sidekiq_jobs_scheduled_count.set({}, stats.scheduled_size)
         sidekiq_jobs_dead_count.set({}, stats.dead_size)
         sidekiq_active_processes.set({}, stats.processes_size)
         sidekiq_jobs_retry_count.set({}, stats.retry_size)
-
-        ::Sidekiq::Queue.all.each do |queue|
-          sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
-        end
 
         # Process-level metrics. These come from a common pool, but we can calculate them as global values.
         # The "quiet" flag (set when the process receives TSTP signal) is only available in the global ProcessSet,
@@ -91,6 +86,7 @@ module Yabeda
         process_set = ::Sidekiq::ProcessSet.new
         concurrencies_by_tag = Hash.new(0)
         available_workers_by_tag = Hash.new(0)
+        tags_by_queue = Hash.new { |hash, key| hash[key] = Set.new }
         process_set.each do |process|
           tag = process["tag"]
           concurrency = process["concurrency"]
@@ -99,6 +95,7 @@ module Yabeda
 
           concurrencies_by_tag[tag] += concurrency
           available_workers_by_tag[tag] += available_workers
+          (process["queues"] || []).each { |queue| tags_by_queue[queue] << tag }
         end
         # Use available_workers instead of busy_workers here because we want quieted processes to report as full.
         concurrencies_by_tag.each do |tag, total_concurrency|
@@ -107,6 +104,26 @@ module Yabeda
           sidekiq_concurrency.set({ tag: tag }, total_concurrency)
           sidekiq_available_workers.set({ tag: tag }, total_available_workers)
           sidekiq_saturation.set({ tag: tag }, (1 - (total_available_workers.to_f / total_concurrency)).round(4))
+        end
+
+        # Queue-level backlog metrics are tagged with which tag(s) currently consume that queue
+        # (usually one, but nothing stops a queue from being shared by multiple tags), so a
+        # consumer can aggregate "all of my queues" with e.g.
+        # `max(sidekiq_queue_latency{tag="foo"}) by (tag)` without maintaining a separate queue
+        # name list (e.g. in a Helm chart) that could drift out of sync with reality. A queue not
+        # currently claimed by any known tag (no active process advertises it right now) still
+        # gets reported, tagged with an empty string, so existing per-queue-only consumers keep
+        # seeing every queue exactly as before.
+        stats.queues.each do |queue, waiting_count|
+          tags = tags_by_queue.fetch(queue, [])
+          tags = [""] if tags.empty?
+          tags.each { |tag| sidekiq_jobs_waiting_count.set({ queue: queue, tag: tag }, waiting_count) }
+        end
+
+        ::Sidekiq::Queue.all.each do |queue|
+          tags = tags_by_queue.fetch(queue.name, [])
+          tags = [""] if tags.empty?
+          tags.each { |tag| sidekiq_queue_latency.set({ queue: queue.name, tag: tag }, queue.latency) }
         end
 
         # That is quite slow if your retry set is large

@@ -182,19 +182,14 @@ RSpec.describe Yabeda::Sidekiq do
           dead_size: 3,
           processed: 42,
           failed: 13,
-          queues: { "default" => 5, "mailers" => 4 },
+          queues: { "default" => 5, "mailers" => 4, "unclaimed" => 2 },
         ),
       )
       allow(Sidekiq::Queue).to receive(:all).and_return(
         [
           OpenStruct.new({ name: "default", latency: 0.5 }),
           OpenStruct.new({ name: "mailers", latency: 0 }),
-        ],
-      )
-      allow(Sidekiq::Queue).to receive(:all).and_return(
-        [
-          OpenStruct.new({ name: "default", latency: 0.5 }),
-          OpenStruct.new({ name: "mailers", latency: 0 }),
+          OpenStruct.new({ name: "unclaimed", latency: 1.2 }),
         ],
       )
       allow(Sidekiq::ProcessSet).to receive(:new).and_return(
@@ -223,11 +218,13 @@ RSpec.describe Yabeda::Sidekiq do
                            busy: 1,
                            quiet: "true",
                          }),
+          # "bar" also consumes "default" (shared with "foo") plus "heavy" (which isn't
+          # reported by Sidekiq::Stats/Queue.all in this setup, e.g. a queue with no jobs yet).
           OpenStruct.new({
                            hostname: "host-bar-4",
                            tag: "bar",
                            concurrency: 20,
-                           queues: ["heavy"],
+                           queues: %w[default heavy],
                            busy: 1,
                            quiet: "false",
                          }),
@@ -235,21 +232,25 @@ RSpec.describe Yabeda::Sidekiq do
       )
     end
 
-    it "collects queue latencies" do
+    it "collects queue latencies, tagged by which tag(s) consume each queue", :aggregate_failures do
       Yabeda.collectors.each(&:call)
 
       expect(Yabeda.sidekiq.queue_latency.values).to include(
-        { queue: "default" } => 0.5,
-        { queue: "mailers" } => 0.0,
+        { queue: "default", tag: "foo" } => 0.5,
+        { queue: "default", tag: "bar" } => 0.5, # shared queue reported once per consuming tag
+        { queue: "mailers", tag: "foo" } => 0.0,
+        { queue: "unclaimed", tag: "" } => 1.2, # no known tag consumes it -> empty tag, still reported
       )
     end
 
-    it "collects queue sizes" do
+    it "collects queue sizes, tagged by which tag(s) consume each queue", :aggregate_failures do
       Yabeda.collectors.each(&:call)
 
       expect(Yabeda.sidekiq.jobs_waiting_count.values).to include(
-        { queue: "default" } => 5,
-        { queue: "mailers" } => 4,
+        { queue: "default", tag: "foo" } => 5,
+        { queue: "default", tag: "bar" } => 5,
+        { queue: "mailers", tag: "foo" } => 4,
+        { queue: "unclaimed", tag: "" } => 2,
       )
     end
 

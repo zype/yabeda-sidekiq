@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+### Added
+
+- `tag` label on `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency`, identifying which
+  Sidekiq process tag(s) currently consume each queue (empty when no known tag claims a queue;
+  reported once per tag when a queue is shared by more than one). Lets consumers (e.g. KEDA
+  autoscaling) aggregate "all queues belonging to tag X" — e.g.
+  `max(sidekiq_queue_latency{tag="X"}) by (tag)` — without maintaining a separate queue-name
+  list. Existing per-`queue` consumers are unaffected; every queue is still reported exactly as
+  before. See INF-3299.
+
 ## 0.10.0 - 2022-10-25
 
 ### Added

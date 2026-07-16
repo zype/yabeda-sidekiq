@@ -52,8 +52,8 @@ Metrics representing state of current Sidekiq worker process and stats of execut
 
 Metrics representing state of the whole Sidekiq installation (queues, processes, etc):
 
- - Number of jobs in queues: `sidekiq_jobs_waiting_count` (segmented by queue)
- - Time of the queue latency `sidekiq_queue_latency` (the difference in seconds since the oldest job in the queue was enqueued)
+ - Number of jobs in queues: `sidekiq_jobs_waiting_count` (segmented by queue, and by the tag of the process(es) that consume that queue)
+ - Time of the queue latency `sidekiq_queue_latency` (the difference in seconds since the oldest job in the queue was enqueued; segmented by queue, and by the tag of the process(es) that consume that queue)
  - Number of scheduled jobs:`sidekiq_jobs_scheduled_count`
  - Number of jobs in retry set: `sidekiq_jobs_retry_count`
  - Number of jobs in dead set (“morgue”): `sidekiq_jobs_dead_count`
@@ -62,6 +62,13 @@ Metrics representing state of the whole Sidekiq installation (queues, processes,
  - Total number of jobs that can be run at a time across all processes, by tag: `sidekiq_concurrency`
  - The number of workers available for new jobs across all processes, by tag: `sidekiq_available_workers`
  - Percentage of workers being consumed out of those that would otherwise be available, by tag: `sidekiq_saturation`
+
+`sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` are tagged with which Sidekiq process
+`tag` currently consumes that queue (a queue not currently claimed by any known tag is reported
+with an empty `tag`, so every queue keeps being reported the way it always was regardless of tag
+usage). If a queue is shared by more than one tag, its value is reported once per tag. This lets
+you aggregate "all queues belonging to tag X" (e.g. `max(sidekiq_queue_latency{tag="X"}) by (tag)`)
+without maintaining a separate queue-name list anywhere.
 
 
 By default all sidekiq worker processes (servers) collects global metrics about whole Sidekiq installation. This can be overridden by setting `collect_cluster_metrics` config key to `true` for non-Sidekiq processes or to `false` for Sidekiq processes (e.g. by setting `YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS` env variable to `no`, see other methods in [anyway_config] docs).

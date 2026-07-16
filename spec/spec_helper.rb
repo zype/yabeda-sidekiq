@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
+require "ostruct" # Not autoloaded on all supported Ruby versions; the spec doubles below need it
 require "sidekiq/cli" # Fake that we're a worker to test worker-specific things
 require "yabeda/sidekiq"
 
