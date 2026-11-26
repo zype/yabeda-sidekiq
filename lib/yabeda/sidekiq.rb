@@ -10,7 +10,7 @@ require "yabeda/sidekiq/server_middleware"
 require "yabeda/sidekiq/config"
 
 module Yabeda
-  module Sidekiq # rubocop:disable Metrics/ModuleLength
+  module Sidekiq
     def self.config
       @config ||= Config.new
     end
