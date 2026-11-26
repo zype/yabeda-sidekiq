@@ -14,7 +14,6 @@ jobs:
     # Skip running tests for local pull requests (use push event instead), run only for foreign ones
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.owner.login != github.event.pull_request.base.repo.owner.login
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.relax_sidekiq == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,23 +34,18 @@ jobs:
           - ruby: '3.3'
             sidekiq: '6.5'
             activejob: '6.1'
-          # Sidekiq 7/8 are not allowed by the gemspec yet; these rows relax it to check whether the zype metrics work there
+          # Sidekiq 7 and 8
           - ruby: '3.4'
             sidekiq: '7.3'
             activejob: '8.0'
-            relax_sidekiq: true
           - ruby: '4.0'
             sidekiq: '8.1'
             activejob: '8.1'
-            relax_sidekiq: true
     env:
       SIDEKIQ_VERSION: '${{ matrix.sidekiq }}'
       ACTIVEJOB_VERSION: '${{ matrix.activejob }}'
     steps:
       - uses: actions/checkout@v4
-      - name: Relax the gemspec Sidekiq constraint (experimental rows only)
-        if: matrix.relax_sidekiq
-        run: sed -i 's/"sidekiq", "< 7.0"/"sidekiq"/' yabeda-sidekiq.gemspec
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
