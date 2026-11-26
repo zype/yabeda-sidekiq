@@ -68,3 +68,15 @@ Metrics/MethodLength:
 
 Metrics/AbcSize:
   Max: 17
+
+Style/SoleNestedConditional:
+  Enabled: false
+
+Style/ExplicitBlockArgument:
+  Enabled: false
+
+Gemspec/RequiredRubyVersion:
+  Enabled: false
+
+Metrics/ModuleLength:
+  Max: 200

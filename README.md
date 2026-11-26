@@ -54,9 +54,9 @@ Metrics representing state of the whole Sidekiq installation (queues, processes,
 
  - Number of jobs in queues: `sidekiq_jobs_waiting_count` (segmented by queue)
  - Time of the queue latency `sidekiq_queue_latency` (the difference in seconds since the oldest job in the queue was enqueued)
- - Number of scheduled jobs:`sidekiq_jobs_scheduled_count`
- - Number of jobs in retry set: `sidekiq_jobs_retry_count`
- - Number of jobs in dead set (“morgue”): `sidekiq_jobs_dead_count`
+ - Number of scheduled jobs:`sidekiq_jobs_scheduled_count` (optionally segmented by queue)
+ - Number of jobs in retry set: `sidekiq_jobs_retry_count` (optionally segmented by queue)
+ - Number of jobs in dead set (“morgue”): `sidekiq_jobs_dead_count` (optionally segmented by queue)
  - Active processes count: `sidekiq_active_processes`
  - Active servers count: `sidekiq_active_workers_count`
  - Total number of jobs that can be run at a time across all processes, by tag: `sidekiq_concurrency`
@@ -70,9 +70,9 @@ By default all sidekiq worker processes (servers) collects global metrics about 
 
 Metrics collected where jobs are being pushed to queues (everywhere):
 
-- Total number of enqueued jobs: `sidekiq_jobs_enqueued_total_count` (segmented by `queue` and `worker` class name)
+- Total number of enqueued jobs: `sidekiq_jobs_enqueued_total` (segmented by `queue` and `worker` class name)
 
-- Total number of rerouted jobs: `sidekiq_jobs_rerouted_total_count` (segmented by origin queue `from_queue`, rerouted queue `to_queue`, and `worker` class name).
+- Total number of rerouted jobs: `sidekiq_jobs_rerouted_total` (segmented by origin queue `from_queue`, rerouted queue `to_queue`, and `worker` class name).
 
   Rerouted jobs are jobs that on enqueue were pushed to different queue from the one specified in worker's `sidekiq_options`, most probably by some middleware.
 
@@ -103,16 +103,25 @@ end
 
 Configuration is handled by [anyway_config] gem. With it you can load settings from environment variables (upcased and prefixed with `YABEDA_SIDEKIQ_`), YAML files, and other sources. See [anyway_config] docs for details.
 
-Config key                | Type     | Default                                                 | Description                                                                                                                                        |
-------------------------- | -------- | ------------------------------------------------------- |----------------------------------------------------------------------------------------------------------------------------------------------------|
-`collect_cluster_metrics` | boolean  | Enabled in Sidekiq worker processes, disabled otherwise | Defines whether this Ruby process should collect and expose metrics representing state of the whole Sidekiq installation (queues, processes, etc). |
-`declare_process_metrics` | boolean  | Enabled in Sidekiq worker processes, disabled otherwise | Declare metrics that are only tracked inside worker process even outside of them. Useful for multiprocess metric collection.                       |
+| Config key                                     | Type    | Default                                                 | Description                                                                                                                                        |
+|------------------------------------------------|---------|---------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `collect_cluster_metrics`                      | boolean | Enabled in Sidekiq worker processes, disabled otherwise | Defines whether this Ruby process should collect and expose metrics representing state of the whole Sidekiq installation (queues, processes, etc). |
+| `declare_process_metrics`                      | boolean | Enabled in Sidekiq worker processes, disabled otherwise | Declare metrics that are only tracked inside worker process even outside of them. Useful for multiprocess metric collection.                       |
+| `retries_segmented_by_queue`                   | boolean | Disabled                                                | Defines whether retries are segmented by queue or reported as a single metric. Iterates the retry set.                                             |
+| `dead_segmented_by_queue`                      | boolean | Disabled                                                | Defines whether dead jobs are segmented by queue or reported as a single metric. Iterates the dead set.                                            |
+| `scheduled_segmented_by_queue`                 | boolean | Disabled                                                | Defines whether scheduled jobs are segmented by queue or reported as a single metric. Iterates the scheduled set.                                  |
+| `filter_queues_by_current_process`             | boolean | Disabled                                                | Collect per-queue cluster metrics (queue sizes, latencies, segmented retry/dead/scheduled counts) only for queues this process works on (all capsules). |
+| `label_for_error_class_on_sidekiq_jobs_failed` | boolean | Disabled                                                | Defines whether `error` label should be added to `sidekiq_jobs_failed_total` metric.                                                               |
+| `buckets`                                      | array   | `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 1800, 3600, 21600]` | Buckets for `sidekiq_job_latency` and `sidekiq_job_runtime` histograms (in seconds)                                                 |
+
+When any of the `*_segmented_by_queue` settings is enabled, that gauge is published for every known
+Sidekiq queue plus any queue still present in the set, so emptied queues report `0` instead of disappearing.
+
+When `filter_queues_by_current_process` is enabled, only queues the current Sidekiq process is configured to work on
+are reported (missing or empty ones as `0`). Note that in non-Sidekiq processes (e.g. a dedicated metrics exporter)
+this is Sidekiq's default queue list (usually just `default`). Non-segmented totals and process/worker counts stay cluster-wide.
 
 # Roadmap (TODO or Help wanted)
-
- - Implement optional segmentation of retry/schedule/dead sets
-
-   It should be disabled by default as it requires to iterate over all jobs in sets and may be very slow on large sets.
 
  - Maybe add some hooks for ease of plugging in metrics for myriads of Sidekiq plugins?
 

@@ -1,13 +1,36 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
+Bundler.require(:test)
+
 require "sidekiq/cli" # Fake that we're a worker to test worker-specific things
 require "yabeda/sidekiq"
 
+require "yabeda/rspec"
 require "sidekiq/testing"
 require "active_job"
-require "active_job/queue_adapters/sidekiq_adapter"
-require "pry"
+
+begin
+  require "active_job/queue_adapters/sidekiq_adapter"
+rescue NameError
+  # Fix for Sidekiq 7.3 where full Rails were required for AJ Sidekiq Adapter
+  # it was fixed in https://github.com/sidekiq/sidekiq/pull/6669
+  module Sidekiq
+    module ActiveJob
+      # @api private
+      class Wrapper
+        include Sidekiq::Job
+
+        def perform(job_data)
+          ::ActiveJob::Base.execute(job_data.merge("provider_job_id" => jid))
+        end
+      end
+    end
+  end
+
+  # for some reason `retry` gives undefined Sidekiq constant in tests
+  require "active_job/queue_adapters/sidekiq_adapter"
+end
 
 require_relative "support/custom_metrics"
 require_relative "support/jobs"
@@ -29,8 +52,10 @@ RSpec.configure do |config|
   Kernel.srand config.seed
   config.order = :random
 
+  config.filter_run focus: true
+  config.run_all_when_everything_filtered = true
+
   config.before(:all) do
-    Yabeda.configure!
     Sidekiq::Testing.fake!
     ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper.jobs.clear
   end
@@ -38,6 +63,18 @@ RSpec.configure do |config|
   config.after(:all) do
     Sidekiq::Queues.clear_all
     Sidekiq::Testing.disable!
+  end
+
+  config.around do |ex|
+    next ex.run unless ex.metadata[:sidekiq]
+
+    begin
+      previous_mode = Sidekiq::Testing.__test_mode
+      Sidekiq::Testing.__set_test_mode(ex.metadata[:sidekiq])
+      ex.run
+    ensure
+      Sidekiq::Testing.__set_test_mode(previous_mode)
+    end
   end
 end
 

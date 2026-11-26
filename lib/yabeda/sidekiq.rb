@@ -11,11 +11,6 @@ require "yabeda/sidekiq/config"
 
 module Yabeda
   module Sidekiq # rubocop:disable Metrics/ModuleLength
-    LONG_RUNNING_JOB_RUNTIME_BUCKETS = [
-      0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, # standard (from Prometheus)
-      30, 60, 120, 300, 1800, 3600, 21_600, # Sidekiq tasks may be very long-running
-    ].freeze
-
     def self.config
       @config ||= Config.new
     end
@@ -29,9 +24,11 @@ module Yabeda
       counter :jobs_rerouted_total, tags: %i[from_queue to_queue worker], comment: "A counter of the total number of rerouted jobs sidekiq enqueued."
 
       if config.declare_process_metrics # defaults to +::Sidekiq.server?+
+        failed_total_tags = config.label_for_error_class_on_sidekiq_jobs_failed ? %i[queue worker error] : %i[queue worker]
+
         counter   :jobs_executed_total,  tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq executed."
         counter   :jobs_success_total,   tags: %i[queue worker], comment: "A counter of the total number of jobs successfully processed by sidekiq."
-        counter   :jobs_failed_total,    tags: %i[queue worker], comment: "A counter of the total number of jobs failed in sidekiq."
+        counter   :jobs_failed_total,    tags: failed_total_tags, comment: "A counter of the total number of jobs failed in sidekiq."
 
         gauge     :running_job_runtime,  tags: %i[queue worker], aggregation: :max, unit: :seconds,
                                          comment: "How long currently running jobs are running (useful for detection of hung jobs)"
@@ -39,23 +36,28 @@ module Yabeda
         histogram :job_latency, comment: "The job latency, the difference in seconds between enqueued and running time",
                                 unit: :seconds, per: :job,
                                 tags: %i[queue worker],
-                                buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
+                                buckets: config.buckets
         histogram :job_runtime, comment: "A histogram of the job execution time.",
                                 unit: :seconds, per: :job,
                                 tags: %i[queue worker],
-                                buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
+                                buckets: config.buckets
       end
 
       # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
       # You can opt-out from collecting these by setting YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS to falsy value (+no+ or +false+)
       if config.collect_cluster_metrics # defaults to +::Sidekiq.server?+
-        gauge     :jobs_waiting_count,   tags: %i[queue], aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
-        gauge     :active_workers_count, tags: [],        aggregation: :most_recent, comment: "The number of currently running machines with sidekiq workers."
-        gauge     :jobs_scheduled_count, tags: [],        aggregation: :most_recent, comment: "The number of jobs scheduled for later execution."
-        gauge     :jobs_retry_count,     tags: [],        aggregation: :most_recent, comment: "The number of failed jobs waiting to be retried"
-        gauge     :jobs_dead_count,      tags: [],        aggregation: :most_recent, comment: "The number of jobs exceeded their retry count."
-        gauge     :active_processes,     tags: [],        aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
-        gauge     :queue_latency,        tags: %i[queue], aggregation: :most_recent,
+        retry_count_tags = config.retries_segmented_by_queue ? %i[queue] : []
+        dead_count_tags = config.dead_segmented_by_queue ? %i[queue] : []
+        scheduled_count_tags = config.scheduled_segmented_by_queue ? %i[queue] : []
+
+        gauge     :jobs_waiting_count,   tags: %i[queue],            aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
+        gauge     :active_workers_count, tags: [],                   aggregation: :most_recent,
+                                         comment: "The number of currently running machines with sidekiq workers."
+        gauge     :jobs_scheduled_count, tags: scheduled_count_tags, aggregation: :most_recent, comment: "The number of jobs scheduled for later execution."
+        gauge     :jobs_retry_count,     tags: retry_count_tags,     aggregation: :most_recent, comment: "The number of failed jobs waiting to be retried"
+        gauge     :jobs_dead_count,      tags: dead_count_tags,      aggregation: :most_recent, comment: "The number of jobs exceeded their retry count."
+        gauge     :active_processes,     tags: [],                   aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
+        gauge     :queue_latency,        tags: %i[queue],            aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
         gauge     :concurrency,          tags: %i[tag],   aggregation: :most_recent,
                                          comment: "The total number of jobs that can be run at a time across all processes, by tag."
@@ -71,17 +73,18 @@ module Yabeda
         next unless config.collect_cluster_metrics
 
         stats = ::Sidekiq::Stats.new
+        process_queues = Yabeda::Sidekiq.process_queue_names if config.filter_queues_by_current_process
+        queue_sizes = stats.queues
+        queue_sizes = process_queues.to_h { |name| [name, queue_sizes.fetch(name, 0)] } if process_queues
 
-        stats.queues.each do |k, v|
+        queue_sizes.each do |k, v|
           sidekiq_jobs_waiting_count.set({ queue: k }, v)
         end
         sidekiq_active_workers_count.set({}, stats.workers_size)
-        sidekiq_jobs_scheduled_count.set({}, stats.scheduled_size)
-        sidekiq_jobs_dead_count.set({}, stats.dead_size)
         sidekiq_active_processes.set({}, stats.processes_size)
-        sidekiq_jobs_retry_count.set({}, stats.retry_size)
 
-        ::Sidekiq::Queue.all.each do |queue|
+        queues = process_queues ? process_queues.map { |name| ::Sidekiq::Queue.new(name) } : ::Sidekiq::Queue.all
+        queues.each do |queue|
           sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
         end
 
@@ -109,15 +112,23 @@ module Yabeda
           sidekiq_saturation.set({ tag: tag }, (1 - (total_available_workers.to_f / total_concurrency)).round(4))
         end
 
-        # That is quite slow if your retry set is large
-        # I don't want to enable it by default
-        # retries_by_queues =
-        #     ::Sidekiq::RetrySet.new.each_with_object(Hash.new(0)) do |job, cntr|
-        #       cntr[job["queue"]] += 1
-        #     end
-        # retries_by_queues.each do |queue, count|
-        #   sidekiq_jobs_retry_count.set({ queue: queue }, count)
-        # end
+        if config.retries_segmented_by_queue
+          Yabeda::Sidekiq.set_jobs_count_by_queue(sidekiq_jobs_retry_count, ::Sidekiq::RetrySet.new, queue_sizes.keys)
+        else
+          sidekiq_jobs_retry_count.set({}, stats.retry_size)
+        end
+
+        if config.dead_segmented_by_queue
+          Yabeda::Sidekiq.set_jobs_count_by_queue(sidekiq_jobs_dead_count, ::Sidekiq::DeadSet.new, queue_sizes.keys)
+        else
+          sidekiq_jobs_dead_count.set({}, stats.dead_size)
+        end
+
+        if config.scheduled_segmented_by_queue
+          Yabeda::Sidekiq.set_jobs_count_by_queue(sidekiq_jobs_scheduled_count, ::Sidekiq::ScheduledSet.new, queue_sizes.keys)
+        else
+          sidekiq_jobs_scheduled_count.set({}, stats.scheduled_size)
+        end
       end
     end
 
@@ -142,12 +153,7 @@ module Yabeda
       end
 
       def worker_class(worker, job)
-        if defined?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) &&
-           (worker.is_a?(ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper) ||
-           worker == ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper)
-          return job["wrapped"].to_s
-        end
-
+        worker = job["wrapped"] || worker
         (worker.is_a?(String) || worker.is_a?(Class) ? worker : worker.class).to_s
       end
 
@@ -169,6 +175,28 @@ module Yabeda
           oldest_job_duration = oldest_job_started_at ? (now - oldest_job_started_at).round(3) : 0
           Yabeda.sidekiq.running_job_runtime.set(labels, oldest_job_duration)
         end
+      end
+
+      # Counts jobs in a Sidekiq job set (retry, dead, scheduled) per queue.
+      # Known queues without jobs in the set are reported as zero, so their series don't go stale.
+      # Queues present only in the set (e.g. removed ones) are reported too, unless filtering by current process.
+      def set_jobs_count_by_queue(metric, job_set, known_queues)
+        counts = job_set.each_with_object(Hash.new(0)) { |job, cntr| cntr[job["queue"]] += 1 }
+        queues = config.filter_queues_by_current_process ? known_queues : known_queues | counts.keys
+        queues.each { |queue| metric.set({ queue: queue }, counts[queue]) }
+      end
+
+      # Names of queues the current process is configured to work on (across all capsules).
+      def process_queue_names
+        queues =
+          if ::Sidekiq.respond_to?(:default_configuration) # Sidekiq 7+
+            ::Sidekiq.default_configuration.capsules.values.flat_map(&:queues)
+          elsif ::Sidekiq.respond_to?(:[]) # Sidekiq 6.5+
+            ::Sidekiq[:queues]
+          else # Sidekiq 5.x – 6.4
+            ::Sidekiq.options[:queues]
+          end
+        queues.uniq # weighted queues are listed multiple times
       end
     end
 

@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+## 0.13.0 - 2026-11-19
+
+### Added
+
+- `buckets` configuration setting to customize buckets of `sidekiq_job_latency` and `sidekiq_job_runtime` histograms.
+
+  Pull request [#44](https://github.com/yabeda-rb/yabeda-sidekiq/pull/44) by [@CaseyDanger]
+
+- `dead_segmented_by_queue` and `scheduled_segmented_by_queue` configuration settings to allow segmentation of dead and scheduled job counts by queue (like `retries_segmented_by_queue`).
+
+  When enabled, `queue` label is added to `sidekiq_jobs_dead_count` and `sidekiq_jobs_scheduled_count` metrics. They are disabled by default as they require to iterate over all jobs in dead or scheduled set and may be very slow if these sets are huge.
+
+  Pull request [#43](https://github.com/yabeda-rb/yabeda-sidekiq/pull/43) by [@duaasajid94]
+
+- `filter_queues_by_current_process` configuration setting to collect per-queue cluster metrics only for queues that current Sidekiq process works on.
+
+  Applies to queue sizes, queue latencies, and retry/dead/scheduled job counts when they are segmented by queue. In Sidekiq 7+ queues of all capsules are taken into account. Useful when running multiple Sidekiq processes with different queue assignments and you want each process to report only its own queues. Do not enable in separate metric exporter processes.
+
+  Pull request [#41](https://github.com/yabeda-rb/yabeda-sidekiq/pull/41) by [@sobrinho]
+
+### Changed
+
+- When retry, dead, or scheduled job counts are segmented by queue, gauges are now published for every known Sidekiq queue (reporting `0` for queues without jobs in the set), so a queue that has been emptied doesn't leave a stale series.
+
+  Pull request [#43](https://github.com/yabeda-rb/yabeda-sidekiq/pull/43) by [@duaasajid94]
+
+## 0.12.0 - 2024-03-08
+
+### Added
+
+- Optional capture of error class for failed jobs counter.
+
+  Set `label_for_error_class_on_sidekiq_jobs_failed` to `true` to add `error` label to `sidekiq_jobs_failed_total` metric.
+
+  Pull request [#34](https://github.com/yabeda-rb/yabeda-sidekiq/pull/34) by [@niborg]
+
+### Changed
+
+- Stop including development-related files into packaged gem to avoid confusing users or software tools. [@Envek]
+
+## 0.11.0 - 2024-02-07
+
+### Added
+
+- `retries_segmented_by_queue` configuration setting to allow segmentation of retry count by queue.
+
+  It is disabled by default as it requires to iterate over all jobs in the retry set and may be very slow if number of retries is huge.
+
+  Pull request [#32](https://github.com/yabeda-rb/yabeda-sidekiq/pull/32) by [@SxDx]
+
 ## 0.10.0 - 2022-10-25
 
 ### Added
@@ -119,3 +169,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 [@asusikov]: https://github.com/asusikov "Alexander Susikov"
 [@mrexox]: https://github.com/mrexox "Valentine Kiselev"
 [@LukinEgor]: https://github.com/LukinEgor "Egor Lukin"
+[@SxDx]: https://github.com/SxDx "René Koller"
+[@niborg]: https://github.com/niborg "Nick Knipe"
+[@sobrinho]: https://github.com/sobrinho "Gabriel Sobrinho"
+[@CaseyDanger]: https://github.com/CaseyDanger "CaseyDanger"
+[@duaasajid94]: https://github.com/duaasajid94 "duaasajid94"
