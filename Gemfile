@@ -8,7 +8,7 @@ git_source(:github) { |repo_name| "https://github.com/#{repo_name}" }
 gemspec
 
 # rubocop:disable Bundler/DuplicatedGem
-sidekiq_version = ENV.fetch("SIDEKIQ_VERSION", "~> 8.1")
+sidekiq_version = ENV.fetch("SIDEKIQ_VERSION", "6.5")
 case sidekiq_version
 when "HEAD"
   gem "sidekiq", git: "https://github.com/sidekiq/sidekiq.git"
