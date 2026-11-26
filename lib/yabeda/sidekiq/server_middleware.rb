@@ -7,7 +7,7 @@ module Yabeda
       # See https://github.com/mperham/sidekiq/discussions/4971
       JOB_RECORD_CLASS = defined?(::Sidekiq::JobRecord) ? ::Sidekiq::JobRecord : ::Sidekiq::Job
 
-      # rubocop: disable Metrics/AbcSize, Metrics/MethodLength:
+      # rubocop: disable Metrics/AbcSize, Metrics/MethodLength
       def call(worker, job, queue, &block)
         custom_tags = Yabeda::Sidekiq.custom_tags(worker, job).to_h
         labels = Yabeda::Sidekiq.labelize(worker, job, queue).merge(custom_tags)
@@ -18,8 +18,10 @@ module Yabeda
           Yabeda::Sidekiq.jobs_started_at[labels][job["jid"]] = start
           Yabeda.with_tags(**custom_tags, &block)
           Yabeda.sidekiq_jobs_success_total.increment(labels)
-        rescue Exception # rubocop: disable Lint/RescueException
-          Yabeda.sidekiq_jobs_failed_total.increment(labels)
+        rescue Exception => e # rubocop: disable Lint/RescueException
+          jobs_failed_labels = labels.dup
+          jobs_failed_labels[:error] = e.class.name if Yabeda::Sidekiq.config.label_for_error_class_on_sidekiq_jobs_failed
+          Yabeda.sidekiq_jobs_failed_total.increment(jobs_failed_labels)
           raise
         ensure
           Yabeda.sidekiq_job_runtime.measure(labels, elapsed(start))
@@ -27,7 +29,7 @@ module Yabeda
           Yabeda::Sidekiq.jobs_started_at[labels].delete(job["jid"])
         end
       end
-      # rubocop: enable Metrics/AbcSize, Metrics/MethodLength:
+      # rubocop: enable Metrics/AbcSize, Metrics/MethodLength
 
       private
 
